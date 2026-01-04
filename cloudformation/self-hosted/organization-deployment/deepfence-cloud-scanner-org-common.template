@@ -1,0 +1,398 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Deepfence Cloud Scanner Organization Deployment - AWS
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: Deepfence Configuration
+      Parameters:
+      - ManagementConsoleURL
+      - ManagementConsolePort
+      - DeepfenceKey
+      - CloudScannerImage
+      - LogLevel
+    - Label:
+        default: Cluster Configuration
+      Parameters:
+      - TargetAWSAccountID
+      - ClusterName
+      - EnabledCloudRegions
+    - Label:
+        default: Create New VPC
+      Parameters:
+      - VPCName
+      - VPCCIDR
+      - SubnetCIDR
+    - Label:
+        default: >-
+          Use Existing VPC (Optional, Target Member AWS Account ID must be
+          set)
+      Parameters:
+      - VPC
+      - VPCSubnet
+      - IG
+    - Label:
+        default: Task Configuration
+      Parameters:
+      - TaskIAMRole
+      - TaskCPU
+      - TaskMemory
+      - TaskEphemeralStorage
+      - EnableCloudTrailTrails
+      - CloudTrailTrails
+    ParameterLabels:
+      ManagementConsoleURL:
+        default: 'Management Console URL. Example: 22.33.44.55 or deepfence.customer.com'
+      ManagementConsolePort:
+        default: Management Console Port
+      DeepfenceKey:
+        default: Deepfence API Key
+      CloudScannerImage:
+        default: Cloud Scanner Image
+      LogLevel:
+        default: Log level
+      TargetAWSAccountID:
+        default: Target Member AWS Account ID
+      ClusterName:
+        default: ECS Cluster Name
+      VPCName:
+        default: VPC Name
+      VPC:
+        default: Cloud Scanner VPC ID
+      VPCSubnet:
+        default: Cloud Scanner Subnet ID
+      IG:
+        default: Internet Gateway ID
+      VPCCIDR:
+        default: Cloud Scanner VPC CIDR Block
+      SubnetCIDR:
+        default: Cloud Scanner Subnet CIDR Block
+      TaskIAMRole:
+        default: >-
+          If SecurityAudit role is chosen, cloud scanner may not find
+          configuration issues in some of the AWS resources like WAF.
+          Also updates will happen only once every day.
+      TaskCPU:
+        default: 'Task CPU Units (Default: 8 vCPU)'
+      TaskMemory:
+        default: 'Task Memory (Default: 16 GB)'
+      TaskEphemeralStorage:
+        default: 'Task Ephemeral Storage (Default: 100 GB)'
+      EnableCloudTrailTrails:
+        default: Enable CloudTrail based updates
+      CloudTrailTrails:
+        default: CloudTrail ARNs (comma separated) to refresh every hour on changes in the infrastructure
+      EnabledCloudRegions:
+        default: AWS regions to scan (Optional, all regions enabled by default)
+Parameters:
+  ManagementConsoleURL:
+    Type: String
+  ManagementConsolePort:
+    Type: String
+    Default: '443'
+  DeepfenceKey:
+    NoEcho: true
+    Type: String
+  CloudScannerImage:
+    Default: 'quay.io/deepfenceio/cloud_scanner_ce:2.5.7'
+    Type: String
+  LogLevel:
+    Default: 'info'
+    Type: String
+    AllowedValues:
+    - 'error'
+    - 'warn'
+    - 'info'
+    - 'debug'
+    - 'trace'
+  TargetAWSAccountID:
+    Type: String
+    Description: >-
+      AWS Account ID where ECS cluster and task will be created (non-root
+      account recommended)
+  ClusterName:
+    Default: deepfence-cloud-scanner
+    Type: String
+  VPCName:
+    Default: deepfence-cloud-scanner-vpc
+    Type: String
+    Description: Name of VPC to be created for cloud scanner to be deployed in
+  VPC:
+    Type: String
+    Description: Existing VPC ID where cloud scanner needs to be deployed
+    Default: ''
+  VPCSubnet:
+    Type: String
+    Description: Subnet within existing VPC to be used for cloud scanner deployment
+    Default: ''
+  VPCCIDR:
+    Type: String
+    Description: VPC CIDR block to use
+    Default: 10.0.0.0/16
+  SubnetCIDR:
+    Type: String
+    Description: Subnet CIDR to use for VPC
+    Default: 10.0.0.0/24
+  IG:
+    Type: String
+    Description: Internet Gateway within existing VPC to connect to internet
+  TaskIAMRole:
+    Type: String
+    Description: Task Role
+    Default: 'arn:aws:iam::aws:policy/SecurityAudit'
+    AllowedValues:
+    - 'arn:aws:iam::aws:policy/SecurityAudit'
+    - 'arn:aws:iam::aws:policy/ReadOnlyAccess'
+  TaskCPU:
+    Type: String
+    Description: Task CPU Units
+    Default: '8192'
+  TaskMemory:
+    Type: String
+    Description: Task Memory (MB)
+    Default: '16384'
+  TaskEphemeralStorage:
+    Type: String
+    Description: Ephemeral Storage (GB)
+    Default: '100'
+  EnableCloudTrailTrails:
+    Type: String
+    Description: true/false
+    Default: false
+    AllowedValues:
+    - false
+    - true
+  CloudTrailTrails:
+    Type: String
+    Description: >-
+      CloudTrail Trail ARNs (Management events with write-only or read-write).
+      If empty, a trail with management events will be automatically chosen if available.
+  EnabledCloudRegions:
+    Type: String
+    Description: 'Only these regions will be scanned. All other regions will be disabled. Example: us-east-1,us-east-2'
+Resources:
+  OrgAccIds:
+    Type: 'Custom::OrgAccIds'
+    Properties:
+      ServiceToken: !GetAtt
+      - OrgAccIdsInfoFunction
+      - Arn
+  OrgAccIdsInfoFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          import re
+          import boto3
+          import cfnresponse
+          import random
+          import os
+          
+          
+          def parse_account_id(arn):
+              regex = r'^.*:(\d+):(root|user)\/.*$'
+              acc_id = re.findall(regex, arn)
+              if acc_id:
+                  return acc_id[0][0]
+              return None
+          
+          
+          def members(event, context):
+              client = boto3.client('organizations')
+              root_accounts = []
+              root_organizational_unit_id = ''
+              next_token = None
+              while True:
+                  try:
+                      if next_token:
+                          resp = client.list_roots(MaxResults=20, NextToken=next_token)
+                      else:
+                          resp = client.list_roots(MaxResults=20)
+                  except client.exceptions.AccessDeniedException:
+                      print("Got AccessDeniedException when calling List Roots API on Organizations Client")
+                      break
+                  if not resp.get('Roots', []):
+                      break
+                  root_accounts.extend(resp['Roots'])
+                  if 'NextToken' in resp:
+                      next_token = resp['NextToken']
+                  else:
+                      break
+              for root_account in root_accounts:
+                  if root_account['Id'].startswith('r-'):
+                      root_organizational_unit_id = root_account['Id']
+              accountIds = {
+                  'rootOrganizationalUnitID': root_organizational_unit_id,
+              }
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, accountIds)
+      Handler: index.members
+      Role: !GetAtt
+      - LambdaExecutionRole
+      - Arn
+      Runtime: python3.11
+      Timeout: '600'
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument: >-
+        {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["lambda.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}
+      Path: /
+      Policies:
+      - PolicyName: root
+        PolicyDocument: >-
+          {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"],"Resource":"arn:aws:logs:*:*:*"},{"Effect":"Allow","Action":["organizations:ListRoots","organizations:ListAccounts"],"Resource":"*"}]}
+  CloudScannerDeployment:
+    Type: 'AWS::CloudFormation::StackSet'
+    Properties:
+      AutoDeployment:
+        Enabled: false
+      Capabilities:
+      - CAPABILITY_NAMED_IAM
+      Description: Deployment of Deepfence Cloud Scanner binary to AWS
+      ManagedExecution:
+        Active: true
+      OperationPreferences:
+        FailureToleranceCount: 0
+        MaxConcurrentCount: 1
+        RegionConcurrencyType: SEQUENTIAL
+        RegionOrder:
+        - !Ref 'AWS::Region'
+      Parameters:
+      - ParameterKey: ManagementConsoleURL
+        ParameterValue: !Ref ManagementConsoleURL
+      - ParameterKey: ManagementConsolePort
+        ParameterValue: !Ref ManagementConsolePort
+      - ParameterKey: DeepfenceKey
+        ParameterValue: !Ref DeepfenceKey
+      - ParameterKey: CloudScannerImage
+        ParameterValue: !Ref CloudScannerImage
+      - ParameterKey: LogLevel
+        ParameterValue: !Ref LogLevel
+      - ParameterKey: ClusterName
+        ParameterValue: !Ref ClusterName
+      - ParameterKey: EnabledCloudRegions
+        ParameterValue: !Ref EnabledCloudRegions
+      - ParameterKey: VPCName
+        ParameterValue: !Ref VPCName
+      - ParameterKey: VPC
+        ParameterValue: !Ref VPC
+      - ParameterKey: VPCSubnet
+        ParameterValue: !Ref VPCSubnet
+      - ParameterKey: VPCCIDR
+        ParameterValue: !Ref VPCCIDR
+      - ParameterKey: SubnetCIDR
+        ParameterValue: !Ref SubnetCIDR
+      - ParameterKey: IG
+        ParameterValue: !Ref IG
+      - ParameterKey: OrgAccId
+        ParameterValue: !Ref 'AWS::AccountId'
+      - ParameterKey: SuccessSignalUrl
+        ParameterValue: !Ref CloudScannerDeploymentComplete
+      - ParameterKey: ParentStackName
+        ParameterValue: !Ref 'AWS::StackName'
+      - ParameterKey: TaskCPU
+        ParameterValue: !Ref TaskCPU
+      - ParameterKey: TaskIAMRole
+        ParameterValue: !Ref TaskIAMRole
+      - ParameterKey: TaskMemory
+        ParameterValue: !Ref TaskMemory
+      - ParameterKey: TaskEphemeralStorage
+        ParameterValue: !Ref TaskEphemeralStorage
+      - ParameterKey: EnableCloudTrailTrails
+        ParameterValue: !Ref EnableCloudTrailTrails
+      - ParameterKey: CloudTrailTrails
+        ParameterValue: !Ref CloudTrailTrails
+      PermissionModel: SERVICE_MANAGED
+      StackInstancesGroup:
+      - DeploymentTargets:
+          AccountFilterType: INTERSECTION
+          OrganizationalUnitIds:
+          - !GetAtt
+            - OrgAccIds
+            - rootOrganizationalUnitID
+          Accounts:
+          - !Ref TargetAWSAccountID
+        Regions:
+        - !Ref 'AWS::Region'
+      StackSetName: !Join
+      - ''
+      - - !Ref 'AWS::StackName'
+        - OrgDeployment
+      TemplateURL: >-
+        https://deepfence-public.s3.amazonaws.com/cloud-scanner/self-hosted/organization-deployment/deepfence-cloud-scanner-org-ecs.template
+  CloudScannerDeploymentComplete:
+    Type: 'AWS::CloudFormation::WaitConditionHandle'
+  CloudScannerDeploymentCompleteWait:
+    Type: 'AWS::CloudFormation::WaitCondition'
+    DependsOn: CloudScannerDeployment
+    Properties:
+      Handle: !Ref CloudScannerDeploymentComplete
+      Timeout: '600'
+  CloudScannerRole:
+    Type: 'AWS::CloudFormation::StackSet'
+    DependsOn: CloudScannerDeploymentCompleteWait
+    Properties:
+      AutoDeployment:
+        Enabled: false
+      Capabilities:
+      - CAPABILITY_NAMED_IAM
+      Description: Deployment of Deepfence Cloud Scanner roles to AWS
+      ManagedExecution:
+        Active: true
+      OperationPreferences:
+        FailureToleranceCount: 99
+        MaxConcurrentCount: 100
+        RegionConcurrencyType: PARALLEL
+      Parameters:
+      - ParameterKey: CloudScannerAccountId
+        ParameterValue: !Ref TargetAWSAccountID
+      - ParameterKey: ParentStackName
+        ParameterValue: !Ref 'AWS::StackName'
+      - ParameterKey: TaskIAMRole
+        ParameterValue: !Ref TaskIAMRole
+      PermissionModel: SERVICE_MANAGED
+      StackInstancesGroup:
+      - DeploymentTargets:
+          AccountFilterType: DIFFERENCE
+          OrganizationalUnitIds:
+          - !GetAtt
+            - OrgAccIds
+            - rootOrganizationalUnitID
+          Accounts:
+          - !Ref 'AWS::AccountId'
+        Regions:
+        - !Ref 'AWS::Region'
+      StackSetName: !Join
+      - ''
+      - - !Ref 'AWS::StackName'
+        - Roles
+      TemplateURL: >-
+        https://deepfence-public.s3.amazonaws.com/cloud-scanner/self-hosted/organization-deployment/deepfence-cloud-scanner-member-roles.template
+  ReadOnlyRole:
+    Type: 'AWS::IAM::Role'
+    DependsOn: CloudScannerDeploymentCompleteWait
+    Properties:
+      Path: /
+      RoleName: !Join
+      - ''
+      - - !Ref 'AWS::StackName'
+      AssumeRolePolicyDocument: !Join
+      - ''
+      - - >-
+          {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["arn:aws:iam::
+        - !Ref TargetAWSAccountID
+        - ':role/'
+        - !Join
+          - ''
+          - - !Ref 'AWS::StackName'
+            - OrgRole
+        - '"]},"Action":"sts:AssumeRole"}]}'
+      MaxSessionDuration: 3600
+      ManagedPolicyArns:
+      - !Ref TaskIAMRole
+      - arn:aws:iam::aws:policy/AWSOrganizationsReadOnlyAccess
+      Tags:
+      - Key: Name
+        Value: !Join
+        - ''
+        - - !Ref 'AWS::StackName'

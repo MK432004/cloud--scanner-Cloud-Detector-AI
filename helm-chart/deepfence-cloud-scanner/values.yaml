@@ -1,0 +1,140 @@
+image:
+  # ThreatMapper
+  repository: quay.io/deepfenceio/cloud_scanner_ce
+  # ThreatStryker
+  # repository: quay.io/deepfenceio/cloud_scanner
+  pullPolicy: Always
+  tag: 2.5.7
+
+# Deepfence management console url and port
+# Format: deepfence.customer.com or 123.123.123.123
+managementConsoleUrl: ""
+managementConsolePort: "443"
+managementConsoleUrlScheme: "https"
+
+# Auth: Get Deepfence api key from UI -> Settings -> User Management
+deepfenceKey:
+  # If secret is created outside of this helm chart, set this to false
+  create: true
+  key: ""
+
+cloudAccount:
+  # AWS account ID / GCP project ID / Azure subscription ID to monitor
+  accountID: ""
+  # Account name (Optional, for easy identification. Not required in organization deployment.)
+  accountName: ""
+
+  # aws / gcp / azure
+  cloudProvider: ""
+  region: ""
+
+  # Applicable only in AWS
+  # Optional: Comma separated list of regions which should be scanned. All other regions will be disabled.
+  # All regions enabled by default
+  # Example: enabledCloudRegions: "us-east-1,us-east-2"
+  enabledCloudRegions: ""
+  
+  # Applicable only in AWS
+  # Policy set for Cloud Scanner in CloudFormation / terraform
+  # arn:aws:iam::aws:policy/ReadOnlyAccess / arn:aws:iam::aws:policy/SecurityAudit
+  cloudScannerPolicy: ""
+  
+  # Optional: AWS account ID / GCP project ID / Azure subscription ID where the helm chart is deployed,
+  # in case it is different from cloudAccount.accountID
+  deployedAccountID: ""
+
+  # For Organization deployment:
+
+  # Is this organization deployment or single account deployment?
+  isOrganizationDeployment: false
+
+  # Organization root account ID
+  # Should be same as cloudAccount.accountID, in case of AWS/GCP
+  # Should be tenant id, in case of Azure
+  organizationAccountID: ""
+
+  # Applicable only in AWS
+  # Role name. The name should be same across all accounts in the Organization deployment.
+  # Role ARN example: arn:aws:iam::123456789012:role/deepfence-cloud-scanner-role
+  # Role name in this case is deepfence-cloud-scanner-role
+  roleName: ""
+
+# Log level: error/warn/info/debug/trace
+logLevel: info
+
+# Optional: To refresh the cloud resources every hour, provide CloudTrail Trail ARNs (Management events with write-only or read-write).
+# If empty, a trail with management events will be automatically chosen if available.
+cloudAuditLogsEnabled: false
+cloudAuditLogIDs: ""
+
+# Only applicable in AWS
+# Must be one of "Ec2InstanceMetadata", "EcsContainer", "Environment", "ServiceAccount"
+# service account needs special handling
+awsCredentialSource: "ServiceAccount"
+
+# priorityClassName for pods
+priorityClassName: ""
+
+volume:
+  # Storage class
+  # AWS: gp3, GCP: standard
+  storageClass: ""
+  volumeSize: 200G
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: true
+
+  # Annotations to add to the service account
+  annotations: {}
+  # annotations:
+  #   "eks.amazonaws.com/role-arn": "arn:aws:iam::123456789012:role/deepfence-cloud-scanner"
+
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+env_vars: {}
+  ## required for azure cloud
+  # AZURE_TENANT_ID: 
+  # AZURE_REGION:
+  # AZURE_CLIENT_ID :
+  # AZURE_CLIENT_SECRET:
+  # AZURE_SUBSCRIPTION_ID: 
+  # GCP_SERVICE_ACCOUNT_CREDENTIAL:
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+resources:
+  limits:
+    cpu: 8000m
+    memory: 16384Mi
+  requests:
+    cpu: 500m
+    memory: 1024Mi
+
+nodeSelector:
+  kubernetes.io/os: linux
+  kubernetes.io/arch: amd64
+
+tolerations: []
+
+affinity: {}

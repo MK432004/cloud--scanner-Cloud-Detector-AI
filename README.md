@@ -1,29 +1,20 @@
-# Cloud Scanner – Cloud Detector AI
+# Deepfence Cloud Scanner
 
-## Overview
-Cloud Scanner is an AI-based intelligent monitoring and detection system designed to perform automated scanning and real-time analysis of digital and visual data. The project focuses on identifying repetitive patterns, anomalies, and abnormal behaviors using Machine Learning and Computer Vision techniques.
+Deepfence Cloud Scanner runs in your cloud environment, gathering inventory and compliance information for the assets deployed in that environment. It submits that information to your Deepfence ThreatMapper or ThreatStryker Management Console.
 
-## Objective
-To design a conceptual AI-enabled monitoring framework that demonstrates automated detection, intelligent analysis, and decision-support capabilities in complex data environments.
+Deploy Deepfence Cloud Scanner using the appropriate Terraform module for the cloud you wish to monitor.
 
-## Key Features
-- Automated scanning and real-time analysis
-- Pattern and anomaly detection
-- AI-based intelligent monitoring
-- Modular and scalable design
-- Research and innovation oriented
+## Deploying Cloud Scanner
 
-## Technologies Used
-- Python
-- Machine Learning
-- Computer Vision
-- AI-based detection models
+- Cloud scanner is deployed in ECS Fargate / GCP Cloud Run / Azure Container Instance
+- Deployment is done using AWS CloudFormation template or terraform
+- Documentation: https://docs.deepfence.io/threatmapper/docs/cloudscanner/
 
-## Use Case (Conceptual)
-- Intelligent monitoring systems
-- Automated detection frameworks
-- Research and academic demonstrations
-- Defence electronics innovation (non-classified)
+## Build Cloud Scanner
 
-## Disclaimer
-This project is purely academic and conceptual in nature. It does not involve any classified data, operational defence systems, or weapon-related technologies.
+Cloud Scanner is part of ThreatMapper. Building Cloud Scanner is done from the ThreatMapper repository.
+```shell
+git clone https://github.com/deepfence/ThreatMapper
+cd ThreatMapper
+make bootstrap cloudscanner
+```
